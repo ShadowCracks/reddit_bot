@@ -10,23 +10,29 @@ from selenium.webdriver.common.keys import Keys
 MESSAGED_FILE = "messaged_authors.txt"
 NO_CHAT_FILE = "no_chat_authors.txt"
 
-# A list of alternative openers for general or fallback cases
+# A list of alternative openers for general/fallback cases
 openers = [
     "Hey, your post caught my eye because I’ve got some relevant experience. Want to see if we’re on the same page?",
     "I’ve got some thoughts on how I might help. Care to discuss for a minute?",
-    "Hello! I noticed your post and I’m excited about the role. Can u share more details?",
+    "Hello! I noticed your post and I’m excited about the role. Can you share more details?",
     "Hey! I believe I can bring something unique to your project. Can we chat about the specifics?",
     "Hey just read your post. Do you mind if I ask a few questions?"
 ]
 
 # Messages for specific categories
-DESIGN_MESSAGE = (
-    "Hey, I'm an experienced logo designer/video editor. I'd love to send you my portfolio "
+LOGO_DESIGN_MESSAGE = (
+    "Hey, I'm an experienced logo designer. I'd love to send you my portfolio "
     "on Discord, Telegram, or via email if you're interested!"
 )
+
+VIDEO_EDITING_MESSAGE = (
+    "Hey, I'm an experienced video editor. I'd love to send you my portfolio "
+    "on Discord, Telegram, or via email if you're interested!"
+)
+
 DEV_MESSAGE = (
-    "Hey! Here’s my portfolio: nofeelance.com. I took a good look at your post, and I'd "
-    "love to ask a few more questions about it."
+    "Hey! Here’s my portfolio: nofeelance.com  I took a good look at your post, and I'd "
+    "love to ask you a few more questions about it."
 )
 
 # Keywords for specific categories
@@ -71,29 +77,48 @@ def type_like_human(element, text, wpm=70):
         # Add slight random variation to mimic natural typing variability.
         time.sleep(delay * random.uniform(0.8, 1.2))
 
-def get_message_for_post(title: str) -> str:
+def get_message_for_post(full_post_text: str) -> str:
     """
-    Returns the message to send based on the post title.
-    1. If title contains "logo design" or "video editing" → DESIGN_MESSAGE
-    2. If title contains any developer-related keywords → DEV_MESSAGE
-    3. If the post *only* contains "hiring" or "task" → random choice from openers
-    4. Otherwise, random choice from openers
+    Returns the message to send based on the post's overall content (title + body).
+
+    1. If text has 'task', IMMEDIATELY return a random opener (we do NOT scan for anything else).
+    2. Otherwise, if text contains "logo design", send the LOGO_DESIGN_MESSAGE.
+    3. Otherwise, if text contains "video editing", send the VIDEO_EDITING_MESSAGE.
+       (If it contains both, pick which you prefer. Below is an example showing how to handle both.)
+    4. Otherwise, if text has dev-related keywords, send DEV_MESSAGE.
+    5. Otherwise, if the entire text is exactly "hiring", send a random opener.
+    6. Otherwise, send a random opener.
     """
-    lower_title = title.lower().strip()
+    lower_text = full_post_text.lower().strip()
 
-    # 1. Check design-related keywords
-    if any(k in lower_title for k in design_keywords):
-        return DESIGN_MESSAGE
-
-    # 2. Check developer-related keywords
-    if any(k in lower_title for k in dev_keywords):
-        return DEV_MESSAGE
-
-    # 3. If the entire title is just "hiring" or "task"
-    if lower_title in ["hiring", "task"]:
+    # 1. Highest priority: 'task'
+    if "task" in lower_text:
         return random.choice(openers)
 
-    # 4. Fallback message
+    # 2 & 3. Check for design-related keywords
+    found_logo = "logo design" in lower_text
+    found_video = "video editing" in lower_text
+
+    if found_logo and found_video:
+        # If you want a combined message, you can do so. For example:
+        return (
+            "Hey, I'm an experienced logo designer and video editor. I'd love to show you my portfolio "
+            "on Discord, Telegram, or via email if you're interested!"
+        )
+    elif found_logo:
+        return LOGO_DESIGN_MESSAGE
+    elif found_video:
+        return VIDEO_EDITING_MESSAGE
+
+    # 4. Check developer-related keywords
+    if any(k in lower_text for k in dev_keywords):
+        return DEV_MESSAGE
+
+    # 5. If the entire text is exactly "hiring"
+    if lower_text == "hiring":
+        return random.choice(openers)
+
+    # 6. Fallback to a random opener
     return random.choice(openers)
 
 def monitor_job_posts():
@@ -108,7 +133,7 @@ def monitor_job_posts():
     print("Chrome launched. You have 5 seconds to sign in if needed...")
     time.sleep(5)
 
-    # Load authors we've already processed from disk (both messaged and no chat)
+    # Load authors we've already processed (both messaged and no chat)
     processed_authors = load_processed_authors()
     print(f"Loaded {len(processed_authors)} processed authors from files.")
 
@@ -129,15 +154,25 @@ def monitor_job_posts():
                     author_elem = post.find_element(By.CLASS_NAME, "author")
                     author_name = author_elem.text.strip()
 
-                    # We'll still filter on "hiring" in the title to identify relevant posts,
-                    # but the message we send now depends on the new function
-                    if "hiring" in title.lower():
+                    # Attempt to extract the self-text of the post
+                    try:
+                        body_element = post.find_element(By.CSS_SELECTOR, ".usertext-body")
+                        body_text = body_element.text.strip()
+                    except:
+                        body_text = ""
+
+                    # Combine title + body
+                    full_post_text = f"{title} {body_text}".strip()
+
+                    # We only process if the text contains "hiring" OR "task"
+                    lower_full = full_post_text.lower()
+                    if "hiring" in lower_full or "task" in lower_full:
                         # Skip if we've already processed
                         if author_name in processed_authors:
                             print(f"Already processed '{author_name}', skipping.")
                             continue
 
-                        print(f"Found a 'hiring' post by '{author_name}', processing...")
+                        print(f"Found a 'hiring/task' post by '{author_name}'. Checking for chat...")
                         author_url = author_elem.get_attribute("href")
                         driver.get(author_url)
                         time.sleep(2)
@@ -160,8 +195,8 @@ def monitor_job_posts():
                                 driver.switch_to.frame(iframe)
                                 time.sleep(5)
                                 
-                                # Decide which message to send based on the post title
-                                selected_message = get_message_for_post(title)
+                                # Decide which message to send based on combined text
+                                selected_message = get_message_for_post(full_post_text)
 
                                 # Type out the message in a "human-like" way
                                 active_element = driver.switch_to.active_element
@@ -181,6 +216,7 @@ def monitor_job_posts():
                             print(f"No chat option available for '{author_name}', marking as no chat.")
                             processed_authors.add(author_name)
                             append_no_chat_author_to_file(author_name)
+                        
                         time.sleep(2)
                 except Exception as e:
                     print(f"Error processing post: {e}")
