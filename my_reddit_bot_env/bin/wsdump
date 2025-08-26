@@ -1,4 +1,4 @@
-#!/home/shadow-crack/reddit_bot/my_reddit_bot_env/bin/python3
+#!/home/shadow-crack/reddit_bot/my_reddit_bot_env/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys
